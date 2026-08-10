@@ -1,7 +1,5 @@
 # PIDRA
 
-
-
 PIDRA is a small Linux TUI for answering two questions:
 
 1. Which desktop app is using all that memory?
