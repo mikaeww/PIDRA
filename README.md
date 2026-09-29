@@ -21,8 +21,8 @@ PIDRA   Apps 6 / Dev 2                                  CPU 18% ━····  RAM
 
 PROCESS NAME                                         PID      MEM P/R↓  REL. MEM
 
-›spotify                                            2031      1.2 GB P  ━━━━━━━━━━
- zen                                              128870      998 MB R  ━━━━━━━━··
+spotify                                             2031      1.2 GB P  ━━━━━━━━━━
+zen                                               128870      998 MB R  ━━━━━━━━··
 
 spotify →  [R] Restart  [S] Stop  [D] Details
 Showing 6 GUI processes from 412 scanned processes

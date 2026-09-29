@@ -344,7 +344,7 @@ mod tests {
         let rendered = terminal.backend().to_string();
         assert!(rendered.contains("PIDRA"));
         assert!(rendered.contains("PROCESS NAME"));
-        assert!(rendered.contains(">nira"));
+        assert!(rendered.contains("nira"));
     }
 
     #[test]

@@ -62,13 +62,8 @@ pub fn render(
         .enumerate()
         .map(|(offset, process)| {
             let selected = start + offset == app.selected;
-            let marker = if selected {
-                if options.ascii { ">" } else { "›" }
-            } else {
-                " "
-            };
             let name = Line::from(Span::styled(
-                format!("{marker}{}", app.display_name(process)),
+                app.display_name(process),
                 if selected {
                     palette.selected_row()
                 } else {
