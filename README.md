@@ -250,4 +250,5 @@ cargo build --release
 The implementation rules are in [BUILDPLAN.md](BUILDPLAN.md), and the manual
 terminal checks are in [docs/SMOKE_TESTS.md](docs/SMOKE_TESTS.md).
 
-PIDRA currently targets Linux only. No license has been chosen yet.
+PIDRA currently targets Linux only. It is licensed under the MIT license, see
+[LICENSE](LICENSE).

@@ -3,6 +3,7 @@ name = "pidra"
 version = "0.1.0"
 edition = "2024"
 description = "Keyboard-first Linux terminal process manager"
+license = "MIT"
 
 [dependencies]
 clap = { version = "4.6.5", features = ["derive"] }
