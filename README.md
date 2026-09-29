@@ -57,7 +57,7 @@ Add PIDRA to the `inputs` of the flake that manages your Home Manager
 configuration:
 
 ```nix
-inputs.pidra.url = "github:mika2go/PIDRA";
+inputs.pidra.url = "github:mikaeww/PIDRA";
 ```
 
 Add the Home Manager module to a module file such as `apps/pidra/default.nix`:
