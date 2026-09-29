@@ -134,6 +134,14 @@ pub fn resolve_restart_source(process: &ProcessSnapshot) -> RestartSource {
     let Some(executable) = process.executable.clone() else {
         return unavailable("executable path is unreadable or this is a kernel thread");
     };
+    if executable
+        .file_name()
+        .is_some_and(|name| name == "bwrap" || name == "flatpak")
+    {
+        return unavailable(
+            "sandbox launcher cannot be replayed safely; reopen the application from its launcher",
+        );
+    }
     if !executable.is_absolute() {
         return unavailable("executable path is not absolute");
     }

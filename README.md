@@ -16,24 +16,28 @@ classified and PIDRA's close-risk notes. The main table totals the root and all
 of its descendants instead of showing only a browser or Electron root process.
 
 ```text
-PIDRA                       6 GUI  [V] 2 DEV               CPU 18  MEM 35
+PIDRA   Apps 6 / Dev 2                           CPU 18% ━····  RAM 35% ━━···
 
-PROCESS NAME                    ID    MEM P/R      RESTART   STOP   DETAILS
->spotify                       2031   1.2 GB P       [R]      [S]      [D]
- zen                         128870   998 MB R       [R]      [S]      [D]
+PROCESS NAME                         PID       MEM P/R↓  REL. MEM
+›spotify                            2031       1.2 GB P   ━━━━━━━━━━
+ zen                              128870       998 MB R   ━━━━━━━━··
 
-V DEV  UP/DOWN ROW  LEFT/RIGHT ACTION  ENTER USE  O SORT  / SEARCH  H HISTORY
+spotify → [R] Restart   [S] Stop   [D] Details
+
+Enter use   / Search   O Sort   V Apps/Dev   ? Help   Q Quit
 ```
 
 `P` means complete proportional set size (PSS); `R` means PIDRA fell back to
 the complete tree's RSS because at least one PSS value was unavailable.
+The relative memory bars compare each app with the largest app in the current
+list. Actions appear once below the table and apply to the selected process.
 
 ## Install
 
 You need a current Rust toolchain and Linux.
 
 ```bash
-git clone https://github.com/mika2go/PIDRA.git
+git clone https://github.com/mikaeww/PIDRA.git
 cd PIDRA
 cargo install --path . --locked
 ```
@@ -93,12 +97,15 @@ home.packages = [
 | `O` | Cycle sorting by memory, CPU, name, PID and write rate |
 | `F`, `T` | Freeze/resume or send SIGTERM in Details |
 | `Shift+K` | Open the Force Stop confirmation |
+| `Tab` | Switch Details between Overview and Technical |
+| `Page Up` / `Page Down` | Scroll Details or Restart information |
 | `H` | Show the bounded session or optional persistent action history |
 | `?` | Open help |
 | `Q` | Quit |
 
-Mouse actions use a deliberate two-step click: the first click selects the
-button, the second click runs it. `Enter` does the same after the first click.
+Click a table row to select a process. In the shared action bar, clicking an
+unfocused action focuses it; clicking the focused action runs it. `Enter`
+also runs the focused action.
 This keeps an accidental click from stopping an application.
 
 ## A few important details

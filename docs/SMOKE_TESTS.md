@@ -30,12 +30,16 @@ For Kitty, Foot and Alacritty, then inside tmux and over SSH:
 4. Press `V`, verify the developer/server header and return with `V` or `Esc`.
    Do not stop a real server during this check.
 5. Open Details, verify separate process and `APP TREE` resources plus a trend,
-   expand/collapse subprocess nodes and return with `Esc`.
+   expand/collapse subprocess nodes, switch Overview/Technical with `Tab`,
+   scroll with Page Up/Page Down and return with `Esc`.
 6. Open Restart and Force Stop confirmation, verify exact PID/start time, then
-   cancel with `N`.
+   verify the restart steps remain understandable at narrow sizes, scroll them,
+   then cancel with `N`.
 7. Quit with `Q`; verify cursor, echo, canonical input and the original screen
    are restored.
-8. Repeat without `--no-mouse`; verify wheel/click mapping. Repeat with
+8. Repeat without `--no-mouse`; verify wheel/row selection and the shared action-bar click mapping.
+   Row clicks must never execute an action. Check that the bar follows selection
+   and remains usable after narrowing the window. Repeat with
    `--no-mouse`; verify ordinary terminal text selection remains available.
 9. Repeat with `NO_COLOR=1` and confirm all states remain textual.
 10. Run `pidra inspect --pid $$ --json`; verify valid JSON appears without an

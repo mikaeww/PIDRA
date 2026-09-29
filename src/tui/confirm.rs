@@ -35,7 +35,7 @@ pub fn render(frame: &mut Frame<'_>, app: &App, options: RenderOptions) {
         )
     });
     let lines = vec![
-        Line::styled("CONFIRM FORCE STOP", palette.header()),
+        Line::styled("CONFIRM FORCE STOP", palette.danger()),
         Line::from(""),
         Line::from(format!("PROCESS    {}", confirmation.process_name)),
         Line::from(format!("PID        {}", confirmation.identity.pid)),
@@ -56,7 +56,7 @@ pub fn render(frame: &mut Frame<'_>, app: &App, options: RenderOptions) {
         ),
         Line::from("PIDRA will validate the start time again before sending the signal."),
         Line::from(""),
-        Line::styled("ENTER / Y CONFIRM     ESC / N CANCEL", palette.header()),
+        Line::styled("ENTER / Y CONFIRM     ESC / N CANCEL", palette.danger()),
     ];
     frame.render_widget(Paragraph::new(lines).alignment(Alignment::Left), rows[1]);
 }

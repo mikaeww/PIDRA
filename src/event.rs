@@ -4,7 +4,7 @@ use crossterm::event::{self, Event, MouseButton, MouseEventKind};
 use ratatui::{Terminal, backend::Backend, layout::Rect};
 
 use crate::{
-    app::App,
+    app::{App, AppView},
     control::{ControlWorker, RestartWorker},
     process::ScanWorker,
     tui,
@@ -80,6 +80,16 @@ where
                 Event::Resize(_, _) => dirty = true,
                 Event::Mouse(mouse) => {
                     match mouse.kind {
+                        MouseEventKind::ScrollUp
+                            if matches!(app.view, AppView::Details | AppView::RestartConfirm) =>
+                        {
+                            app.info_scroll.set(app.info_scroll.get().saturating_sub(3))
+                        }
+                        MouseEventKind::ScrollDown
+                            if matches!(app.view, AppView::Details | AppView::RestartConfirm) =>
+                        {
+                            app.info_scroll.set(app.info_scroll.get().saturating_add(3))
+                        }
                         MouseEventKind::ScrollUp => app.select_previous(),
                         MouseEventKind::ScrollDown => app.select_next(),
                         MouseEventKind::Down(MouseButton::Left) => {

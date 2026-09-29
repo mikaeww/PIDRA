@@ -1,98 +1,95 @@
 use ratatui::{
     Frame,
-    layout::{Alignment, Constraint, Direction, Layout},
+    layout::{Constraint, Layout},
     text::Line,
     widgets::Paragraph,
 };
 
 use crate::{
     app::App,
-    control::{restart::RestartSource, risk::assess_termination},
+    control::restart::RestartSource,
     tui::{RenderOptions, theme::Palette},
 };
 
 pub fn render(frame: &mut Frame<'_>, app: &App, options: RenderOptions) {
     let palette = Palette::new(options.no_color);
-    let area = frame.area();
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Fill(1),
-            Constraint::Length(15),
-            Constraint::Fill(1),
-        ])
-        .split(area);
+    let rows = Layout::vertical([
+        Constraint::Length(2),
+        Constraint::Min(0),
+        Constraint::Length(2),
+    ])
+    .split(frame.area());
     let Some(confirmation) = app.restart_confirmation.as_ref() else {
-        frame.render_widget(Paragraph::new("Restart target unavailable"), rows[1]);
+        frame.render_widget(
+            Paragraph::new("Restart target unavailable\n\nEsc Cancel"),
+            frame.area(),
+        );
         return;
     };
-    let assessment = app
-        .process_by_identity(confirmation.identity)
-        .map(|process| {
-            assess_termination(
-                process,
-                &app.all_processes,
-                i32::try_from(std::process::id()).unwrap_or(i32::MAX),
-            )
-        });
-    let (source, detail, warning) = match &confirmation.source {
-        RestartSource::SystemdUserUnit { unit } => (
-            "SYSTEMD USER UNIT".to_owned(),
-            unit.clone(),
-            "systemd will restart the exact validated service unit".to_owned(),
-        ),
-        RestartSource::Direct {
-            executable,
-            arguments,
-            working_directory,
-            application_scope,
-        } => (
-            "DIRECT EXEC".to_owned(),
-            format!(
-                "{}  |  {} arguments  |  cwd {}",
-                executable.display(),
-                arguments.len(),
-                working_directory.display()
+
+    frame.render_widget(
+        Paragraph::new(vec![
+            Line::styled(
+                format!("Restart {}", confirmation.process_name),
+                palette.header(),
             ),
-            application_scope.as_deref().map_or_else(
-                || "PIDRA cannot reconstruct the original environment completely".to_owned(),
-                |scope| {
-                    format!(
-                        "{scope} is transient and cannot start the app; PIDRA must use direct exec"
-                    )
-                },
+            Line::styled(
+                format!("PID {}", confirmation.identity.pid),
+                palette.muted(),
             ),
-        ),
-        RestartSource::Unavailable { reason } => (
-            "UNAVAILABLE".to_owned(),
-            reason.clone(),
-            "restart cannot continue".to_owned(),
-        ),
-    };
-    let lines = vec![
-        Line::styled("CONFIRM RESTART", palette.header()),
+        ]),
+        rows[0],
+    );
+
+    let mut lines = vec![
+        Line::styled("Save your work first.", palette.warning()),
         Line::from(""),
-        Line::from(format!("PROCESS    {}", confirmation.process_name)),
-        Line::from(format!("PID        {}", confirmation.identity.pid)),
-        Line::from(format!(
-            "START      {} ticks",
-            confirmation.identity.start_time_ticks
-        )),
-        Line::from(format!("SOURCE     {source}")),
-        Line::from(format!("DETAIL     {detail}")),
-        Line::from(format!(
-            "ASSESSMENT {}",
-            assessment
-                .as_ref()
-                .map_or("UNKNOWN", |value| value.rating.label())
-        )),
-        Line::from(""),
-        Line::from(warning),
-        Line::from("The old PID/start-time identity is revalidated before any action."),
-        Line::from("Direct restart sends SIGTERM and aborts if the old process stays alive."),
-        Line::from("PIDRA never uses a shell and never escalates restart to SIGKILL."),
-        Line::from(""),
-        Line::styled("ENTER / Y CONFIRM     ESC / N CANCEL", palette.header()),
+        Line::styled("STEPS", palette.table_header()),
     ];
-    frame.render_widget(Paragraph::new(lines).alignment(Alignment::Left), rows[1]);
+    match &confirmation.source {
+        RestartSource::SystemdUserUnit { unit } => {
+            lines.extend([
+                Line::from("1  Ask systemd to restart the application."),
+                Line::from("2  Wait for its new process."),
+                Line::from(""),
+                Line::styled(format!("Service: {unit}"), palette.muted()),
+            ]);
+        }
+        RestartSource::Direct { .. } => {
+            lines.extend([
+                Line::from("1  Stop the selected process normally (SIGTERM)."),
+                Line::from("2  Start the recorded executable again."),
+                Line::from(""),
+                Line::from("If the process stays open, PIDRA cancels the restart."),
+                Line::from("PIDRA never force kills during restart."),
+                Line::from(""),
+                Line::styled(
+                    "Unsaved work and the full environment cannot be restored.",
+                    palette.warning(),
+                ),
+            ]);
+        }
+        RestartSource::Unavailable { reason } => {
+            lines.push(Line::from(format!("Restart unavailable: {reason}")));
+        }
+    }
+    lines.extend([
+        Line::from(""),
+        Line::styled("TARGET", palette.table_header()),
+        Line::from(format!(
+            "{}   PID {}",
+            confirmation.process_name, confirmation.identity.pid
+        )),
+        Line::styled(
+            "PID and start time are checked again before anything happens.",
+            palette.muted(),
+        ),
+    ]);
+    super::render_scrollable(frame, rows[1], lines, &app.info_scroll);
+    let footer = if frame.area().width < 40 {
+        "Enter Restart\nEsc Cancel  PgUp/PgDn"
+    } else {
+        "Enter / Y Restart   Esc / N Cancel\nPgUp/PgDn Scroll"
+    };
+    frame.render_widget(Paragraph::new(footer).style(palette.accent()), rows[2]);
 }

@@ -1,14 +1,14 @@
 use ratatui::{
     Frame,
     layout::{Constraint, Rect},
-    style::Style,
-    widgets::{Cell, Row, Table},
+    text::{Line, Span},
+    widgets::{Cell, Paragraph, Row, Table},
 };
 
 use crate::{
-    app::{App, FocusColumn},
+    app::{App, FocusColumn, SortMode},
     process::ProcessSnapshot,
-    tui::{RenderOptions, TableHit, theme::Palette},
+    tui::{RenderOptions, TableHit, layout, theme::Palette},
 };
 
 pub fn render(
@@ -18,122 +18,177 @@ pub fn render(
     options: RenderOptions,
     palette: &Palette,
 ) {
-    if area.width < 58 {
-        render_compact(frame, area, app, options, palette);
-        return;
-    }
-
-    let header = Row::new([
-        sort_header(
+    let show_bars = area.width >= 64;
+    let mut widths = vec![
+        Constraint::Min(12),
+        Constraint::Length(8),
+        Constraint::Length(12),
+    ];
+    let mut headers = vec![
+        Cell::from(sort_header(
             "PROCESS NAME",
-            app.sort_mode == crate::app::SortMode::Name,
+            app.sort_mode == SortMode::Name,
             options,
+        )),
+        Cell::from(
+            Line::from(sort_header("PID", app.sort_mode == SortMode::Pid, options)).right_aligned(),
         ),
-        sort_header("ID", app.sort_mode == crate::app::SortMode::Pid, options),
-        sort_header(
-            "MEM P/R",
-            app.sort_mode == crate::app::SortMode::Memory,
-            options,
-        ),
-        "RESTART".to_owned(),
-        "STOP".to_owned(),
-        "DETAILS".to_owned(),
-    ])
-    .style(palette.table_header())
-    .bottom_margin(1);
-
-    let (start, end) = visible_range(app.processes.len(), app.selected, area.height);
-    let rows = app.processes[start..end]
-        .iter()
-        .enumerate()
-        .map(|(offset, process)| {
-            row(
-                app,
-                process,
-                start + offset == app.selected,
-                app.focus,
+        Cell::from(
+            Line::from(sort_header(
+                "MEM P/R",
+                app.sort_mode == SortMode::Memory,
                 options,
-                palette,
-            )
-        });
-
-    let table = Table::new(
-        rows,
-        [
-            Constraint::Min(18),
-            Constraint::Length(8),
-            Constraint::Length(12),
-            Constraint::Length(9),
-            Constraint::Length(7),
-            Constraint::Length(8),
-        ],
-    )
-    .header(header)
-    .column_spacing(1);
-    frame.render_widget(table, area);
-}
-
-fn render_compact(
-    frame: &mut Frame<'_>,
-    area: Rect,
-    app: &App,
-    options: RenderOptions,
-    palette: &Palette,
-) {
-    let header = Row::new([
-        sort_header(
-            "PROCESS NAME",
-            app.sort_mode == crate::app::SortMode::Name,
-            options,
+            ))
+            .right_aligned(),
         ),
-        sort_header("ID", app.sort_mode == crate::app::SortMode::Pid, options),
-        sort_header(
-            "MEM P/R",
-            app.sort_mode == crate::app::SortMode::Memory,
-            options,
-        ),
-    ])
-    .style(palette.table_header())
-    .bottom_margin(1);
+    ];
+    if show_bars {
+        widths.push(Constraint::Length(12));
+        headers.push(Cell::from("REL. MEM"));
+    }
+    let maximum = app
+        .processes
+        .iter()
+        .map(|process| {
+            app.application_resources(process.identity)
+                .preferred_memory_bytes()
+        })
+        .max()
+        .unwrap_or(0)
+        .max(1);
     let (start, end) = visible_range(app.processes.len(), app.selected, area.height);
     let rows = app.processes[start..end]
         .iter()
         .enumerate()
         .map(|(offset, process)| {
             let selected = start + offset == app.selected;
-            let marker = match (selected, options.ascii) {
-                (true, true) => ">",
-                (true, false) => "›",
-                (false, _) => " ",
-            };
-            Row::new([
-                Cell::from(format!("{marker}{}", process.name)),
-                Cell::from(process.identity.pid.to_string()),
-                Cell::from(format_application_memory(app, process)),
-            ])
-            .style(if selected {
-                palette.selected_row()
+            let marker = if selected {
+                if options.ascii { ">" } else { "›" }
             } else {
-                Style::default()
-            })
+                " "
+            };
+            let name = Line::from(Span::styled(
+                format!("{marker}{}", app.display_name(process)),
+                if selected {
+                    palette.selected_row()
+                } else {
+                    palette.base()
+                },
+            ));
+            let mut cells = vec![
+                Cell::from(name),
+                Cell::from(Line::from(process.identity.pid.to_string()).right_aligned())
+                    .style(palette.muted()),
+                Cell::from(Line::from(format_application_memory(app, process)).right_aligned()),
+            ];
+            if show_bars {
+                let memory = app
+                    .application_resources(process.identity)
+                    .preferred_memory_bytes();
+                cells.push(Cell::from(meter(
+                    memory as f64 / maximum as f64,
+                    10,
+                    options.ascii,
+                    palette,
+                )));
+            }
+            Row::new(cells).style(palette.base())
         });
     frame.render_widget(
-        Table::new(
-            rows,
-            [
-                Constraint::Min(12),
-                Constraint::Length(8),
-                Constraint::Length(12),
-            ],
-        )
-        .header(header)
-        .column_spacing(1),
+        Table::new(rows, widths)
+            .header(
+                Row::new(headers)
+                    .style(palette.table_header())
+                    .bottom_margin(1),
+            )
+            .column_spacing(2),
         area,
     );
+    if app.processes.is_empty() {
+        let message = if app.search_query.is_empty() {
+            "No matching applications"
+        } else {
+            "No matches - / edit search"
+        };
+        frame.render_widget(
+            Paragraph::new(message).style(palette.muted()),
+            Rect::new(
+                area.x,
+                area.y.saturating_add(1),
+                area.width,
+                area.height.saturating_sub(1),
+            ),
+        );
+    }
+}
+
+pub fn render_actions(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    app: &App,
+    options: RenderOptions,
+    palette: &Palette,
+) {
+    let Some(process) = app.processes.get(app.selected) else {
+        return;
+    };
+    let name = app.display_name(process);
+    let columns = layout::action_areas(area, name);
+    frame.render_widget(
+        Paragraph::new(format!("{name} {}", if options.ascii { "->" } else { "→" }))
+            .style(palette.header()),
+        columns[0],
+    );
+    for (index, focus) in [
+        FocusColumn::Restart,
+        FocusColumn::Stop,
+        FocusColumn::Details,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let available = focus != FocusColumn::Restart
+            || app.restart_source_for(process.identity).is_available();
+        let label = match (focus, area.width < 50, available) {
+            (FocusColumn::Restart, true, true) => "[R]",
+            (FocusColumn::Restart, true, false) => "R --",
+            (FocusColumn::Restart, false, true) => "[R] Restart",
+            (FocusColumn::Restart, false, false) => "[R] --",
+            (FocusColumn::Stop, true, _) => "[S]",
+            (FocusColumn::Stop, false, _) => "[S] Stop",
+            (FocusColumn::Details, true, _) => "[D]",
+            (FocusColumn::Details, false, _) => "[D] Details",
+        };
+        let style = if focus == app.focus {
+            palette.focused_action()
+        } else if available {
+            palette.base()
+        } else {
+            palette.muted()
+        };
+        frame.render_widget(
+            Paragraph::new(label).style(style).centered(),
+            columns[index + 1],
+        );
+    }
+}
+
+pub(super) fn meter(fraction: f64, width: usize, ascii: bool, palette: &Palette) -> Line<'static> {
+    let filled = (fraction.clamp(0.0, 1.0) * width as f64).round() as usize;
+    Line::from(vec![
+        Span::styled(
+            (if ascii { "|" } else { "━" }).repeat(filled),
+            palette.accent(),
+        ),
+        Span::styled(
+            (if ascii { "." } else { "·" }).repeat(width - filled),
+            palette.muted(),
+        ),
+    ])
 }
 
 fn visible_range(total: usize, selected: usize, area_height: u16) -> (usize, usize) {
-    let capacity = usize::from(area_height.saturating_sub(2)).max(1);
+    let capacity = usize::from(area_height.saturating_sub(2));
     let selected = selected.min(total.saturating_sub(1));
     let start = selected.saturating_sub(capacity.saturating_sub(1));
     let end = (start + capacity).min(total);
@@ -147,63 +202,7 @@ pub fn hit_test(area: Rect, app: &App, x: u16, y: u16) -> Option<TableHit> {
     }
     let (start, end) = visible_range(app.processes.len(), app.selected, area.height);
     let row = start + usize::from(y - first_data_row);
-    if row >= end {
-        return None;
-    }
-
-    let focus = if area.width < 58 {
-        None
-    } else {
-        let details_start = area.right().saturating_sub(8);
-        let stop_start = details_start.saturating_sub(8);
-        let restart_start = stop_start.saturating_sub(10);
-        if x >= details_start {
-            Some(FocusColumn::Details)
-        } else if x >= stop_start {
-            Some(FocusColumn::Stop)
-        } else if x >= restart_start {
-            Some(FocusColumn::Restart)
-        } else {
-            None
-        }
-    };
-    Some(TableHit { row, focus })
-}
-
-fn row<'a>(
-    app: &App,
-    process: &'a ProcessSnapshot,
-    selected: bool,
-    focus: FocusColumn,
-    options: RenderOptions,
-    palette: &Palette,
-) -> Row<'a> {
-    let marker = match (selected, options.ascii) {
-        (true, true) => ">",
-        (true, false) => "›",
-        (false, _) => " ",
-    };
-    let restart = if app.restart_source_for(process.identity).is_available() {
-        if options.ascii { "[R]" } else { "[↻]" }
-    } else {
-        "--"
-    };
-    let stop = if options.ascii { "[S]" } else { "[■]" };
-    let details = if options.ascii { "[D]" } else { "[i]" };
-
-    Row::new(vec![
-        Cell::from(format!("{marker}{}", process.name)),
-        Cell::from(process.identity.pid.to_string()),
-        Cell::from(format_application_memory(app, process)),
-        action_cell(restart, selected && focus == FocusColumn::Restart, palette),
-        action_cell(stop, selected && focus == FocusColumn::Stop, palette),
-        action_cell(details, selected && focus == FocusColumn::Details, palette),
-    ])
-    .style(if selected {
-        palette.selected_row()
-    } else {
-        Style::default()
-    })
+    (row < end).then_some(TableHit { row, focus: None })
 }
 
 fn sort_header(label: &str, active: bool, options: RenderOptions) -> String {
@@ -225,15 +224,6 @@ fn format_application_memory(app: &App, process: &ProcessSnapshot) -> String {
             "R"
         }
     )
-}
-
-fn action_cell<'a>(label: &'a str, focused: bool, palette: &Palette) -> Cell<'a> {
-    let cell = Cell::from(label);
-    if focused {
-        cell.style(palette.focused_action())
-    } else {
-        cell
-    }
 }
 
 pub(crate) fn format_bytes(bytes: u64) -> String {
@@ -287,7 +277,7 @@ mod tests {
             hit_test(area, &app, 74, 4),
             Some(TableHit {
                 row: 0,
-                focus: Some(crate::app::FocusColumn::Details),
+                focus: None,
             })
         );
         assert_eq!(

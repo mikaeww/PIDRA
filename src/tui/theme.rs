@@ -1,14 +1,24 @@
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 
 #[derive(Debug, Clone, Copy)]
-pub struct Palette {
-    no_color: bool,
-}
+pub struct Palette;
 
 impl Palette {
     #[must_use]
-    pub fn new(no_color: bool) -> Self {
-        Self { no_color }
+    pub fn new(_no_color: bool) -> Self {
+        Self
+    }
+
+    pub fn base(self) -> Style {
+        Style::default()
+    }
+
+    pub fn warning(self) -> Style {
+        Style::default().add_modifier(Modifier::BOLD)
+    }
+
+    pub fn danger(self) -> Style {
+        Style::default().add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
     }
 
     #[must_use]
@@ -18,24 +28,19 @@ impl Palette {
 
     #[must_use]
     pub fn table_header(self) -> Style {
-        self.muted().add_modifier(Modifier::BOLD)
+        Style::default().add_modifier(Modifier::UNDERLINED)
     }
 
     #[must_use]
     pub fn selected_row(self) -> Style {
-        self.accent()
+        self.base()
+            .add_modifier(Modifier::REVERSED | Modifier::BOLD)
     }
 
     #[must_use]
     pub fn focused_action(self) -> Style {
-        if self.no_color {
-            Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD)
-        } else {
-            Style::default()
-                .fg(Color::Black)
-                .bg(Color::Cyan)
-                .add_modifier(Modifier::BOLD)
-        }
+        self.accent()
+            .add_modifier(Modifier::REVERSED | Modifier::BOLD)
     }
 
     #[must_use]
@@ -48,19 +53,11 @@ impl Palette {
         self.muted()
     }
 
-    fn accent(self) -> Style {
-        if self.no_color {
-            Style::default()
-        } else {
-            Style::default().fg(Color::Cyan)
-        }
+    pub fn accent(self) -> Style {
+        Style::default().add_modifier(Modifier::BOLD)
     }
 
-    fn muted(self) -> Style {
-        if self.no_color {
-            Style::default()
-        } else {
-            Style::default().fg(Color::DarkGray)
-        }
+    pub fn muted(self) -> Style {
+        Style::default().add_modifier(Modifier::DIM)
     }
 }

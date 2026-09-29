@@ -12,7 +12,7 @@ use x11rb::{
     protocol::xproto::{AtomEnum, ConnectionExt as _},
 };
 
-use super::{ProcessIdentity, ProcessSnapshot};
+use super::{ProcessIdentity, ProcessSnapshot, tree::ProcessTree};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum GuiConfidence {
@@ -292,6 +292,7 @@ pub fn classify_gui_processes(
         }
     }
 
+    let tree = ProcessTree::new(processes);
     let mut root_by_scope = HashMap::new();
     let mut classifications = HashMap::new();
     for (scope, members) in &members_by_scope {
@@ -336,6 +337,19 @@ pub fn classify_gui_processes(
             .as_ref()
             .and_then(|scope| root_by_scope.get(scope))
             .copied()
+            .filter(|root| {
+                if *root == window_process.identity {
+                    return true;
+                }
+                let root_process = process_by_pid[&root.pid];
+                !matches!(
+                    root_process.name.as_str(),
+                    "bwrap" | "flatpak" | "bash" | "sh" | "zsh" | "fish" | "env"
+                ) && !window_hints
+                    .iter()
+                    .any(|other| other.pid == root.pid && other.class != hint.class)
+                    && tree.descendants(*root).contains(&window_process.identity)
+            })
             .unwrap_or(window_process.identity);
         let classification =
             classifications
@@ -347,10 +361,15 @@ pub fn classify_gui_processes(
                     application_scope: scope.clone(),
                     evidence: Vec::new(),
                 });
-        classification.confidence = GuiConfidence::Confirmed;
-        if classification.display_name.is_none() {
-            classification.display_name = hint.class.clone();
+        if classification.confidence != GuiConfidence::Confirmed
+            && let Some(class) = hint
+                .class
+                .as_ref()
+                .filter(|class| !class.eq_ignore_ascii_case("electron"))
+        {
+            classification.display_name = Some(class.clone());
         }
+        classification.confidence = GuiConfidence::Confirmed;
         let mut evidence = hint.source.to_owned();
         if let Some(class) = &hint.class {
             evidence.push_str(&format!(" class={class}"));
@@ -360,6 +379,43 @@ pub fn classify_gui_processes(
         }
         if !classification.evidence.contains(&evidence) {
             classification.evidence.push(evidence);
+        }
+    }
+
+    let confirmed_scopes: HashSet<_> = classifications
+        .values()
+        .filter(|classification| classification.confidence == GuiConfidence::Confirmed)
+        .filter_map(|classification| classification.application_scope.clone())
+        .collect();
+    classifications.retain(|_, classification| {
+        classification.confidence == GuiConfidence::Confirmed
+            || !classification
+                .application_scope
+                .as_ref()
+                .is_some_and(|scope| confirmed_scopes.contains(scope))
+    });
+    for classification in classifications.values_mut() {
+        let process = process_by_pid[&classification.identity.pid];
+        if matches!(
+            process.name.as_str(),
+            "kitty" | "foot" | "alacritty" | "wezterm-gui"
+        ) {
+            let mut tools: Vec<_> = tree
+                .descendants(process.identity)
+                .iter()
+                .filter_map(|identity| process_by_pid.get(&identity.pid))
+                .filter_map(|child| match child.name.as_str() {
+                    "claude" => Some("Claude"),
+                    "codex" => Some("Codex"),
+                    _ => None,
+                })
+                .collect();
+            tools.sort_unstable();
+            tools.dedup();
+            if !tools.is_empty() {
+                classification.display_name =
+                    Some(format!("{} - {}", process.name, tools.join(" / ")));
+            }
         }
     }
 
@@ -424,7 +480,15 @@ fn scope_display_name(scope: &str) -> Option<String> {
                 without_suffix
             }
         });
-    Some(name.to_owned())
+    let name = name.strip_prefix("flatpak-").unwrap_or(name);
+    Some(display_app_id(name))
+}
+
+fn display_app_id(name: &str) -> String {
+    if let Some(app) = name.strip_prefix("org.gnome.") {
+        return format!("GNOME {app}");
+    }
+    name.to_owned()
 }
 
 #[cfg(test)]
@@ -440,6 +504,106 @@ mod tests {
         process.uid = rustix::process::getuid().as_raw();
         process.cgroups = vec![cgroup.to_owned()];
         process
+    }
+
+    #[test]
+    fn names_apps_and_terminal_tools_without_merging_independent_windows() {
+        let scope = "0::/user.slice/app.slice/app-kitty-100.scope";
+        let terminal = process("kitty", 100, Some(1), scope);
+        let cli = process("claude", 101, Some(100), scope);
+        let electron = process("electron", 102, Some(100), scope);
+        let mut other_terminal = process("kitty", 200, Some(1), "0::/session.scope");
+        let codex = process("codex", 201, Some(200), "0::/session.scope");
+        let sandbox = process(
+            "bwrap",
+            300,
+            Some(1),
+            "0::/user.slice/app.slice/app-flatpak-org.gnome.Boxes-123.scope",
+        );
+        let hints = vec![
+            WindowHint {
+                pid: 100,
+                class: Some("kitty".into()),
+                title: None,
+                source: "test",
+            },
+            WindowHint {
+                pid: 102,
+                class: Some("Notes".into()),
+                title: None,
+                source: "test",
+            },
+            WindowHint {
+                pid: 200,
+                class: Some("kitty".into()),
+                title: None,
+                source: "test",
+            },
+        ];
+        let processes = vec![
+            terminal,
+            cli,
+            electron,
+            other_terminal.clone(),
+            codex,
+            sandbox.clone(),
+        ];
+        let classified = classify_gui_processes(&processes, &hints);
+        let names: Vec<_> = classified
+            .iter()
+            .map(|c| (c.identity.pid, c.display_name.as_deref().unwrap()))
+            .collect();
+        assert_eq!(
+            names,
+            [
+                (100, "kitty - Claude"),
+                (102, "Notes"),
+                (200, "kitty - Codex"),
+                (300, "GNOME Boxes")
+            ]
+        );
+        assert!(matches!(
+            crate::control::restart::resolve_restart_source(&ProcessSnapshot {
+                executable: Some("/usr/bin/bwrap".into()),
+                cwd: Some("/tmp".into()),
+                ..sandbox.clone()
+            }),
+            crate::control::restart::RestartSource::Unavailable { .. }
+        ));
+        let mut app = crate::app::App::new();
+        app.apply_scan_batch(crate::process::ScanBatch {
+            processes,
+            graphical: classified,
+            developer: vec![],
+            system: Default::default(),
+        });
+        app.handle_key(crossterm::event::KeyEvent::from(
+            crossterm::event::KeyCode::Char('/'),
+        ));
+        for character in "claude".chars() {
+            app.handle_key(crossterm::event::KeyEvent::from(
+                crossterm::event::KeyCode::Char(character),
+            ));
+        }
+        assert_eq!(app.processes.len(), 1);
+        assert_eq!(app.processes[0].identity.pid, 100);
+        assert_eq!(app.processes[0].name, "kitty");
+        other_terminal.uid = u32::MAX;
+        assert!(classify_gui_processes(&[other_terminal], &hints).is_empty());
+
+        let child = process("gnome-boxes", 301, Some(300), &sandbox.cgroups[0]);
+        let classified = classify_gui_processes(
+            &[sandbox, child],
+            &[WindowHint {
+                pid: 301,
+                class: Some("Boxes".into()),
+                title: None,
+                source: "test",
+            }],
+        );
+        assert_eq!(classified.len(), 1);
+        assert_eq!(classified[0].identity.pid, 301);
+        assert_eq!(classified[0].display_name.as_deref(), Some("Boxes"));
     }
 
     #[test]

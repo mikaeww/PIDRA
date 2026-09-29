@@ -325,22 +325,26 @@ Show:
 ### Table columns
 
 1. `PROCESS NAME`
-2. `ID`
-3. `SIZE`
-4. `RESTART`
-5. `STOP`
-6. `DETAILS`
+2. `PID`
+3. `MEM P/R`
+4. `REL. MEM` when at least 64 terminal columns are available
 
 Column requirements:
 
-- Process name receives remaining width and truncates with an ellipsis.
-- PID is right-aligned.
-- Size is right-aligned and formatted as B, KB, MB, GB or TB.
-- Restart shows `[↻]`, `[R]` in ASCII mode, or `--` when unavailable.
-- Stop shows `[■]`, `[S]` in ASCII mode.
-- Details shows `[i]`, `[D]` in ASCII mode.
-- Very narrow terminals hide the action symbols last but retain keyboard
-  shortcuts and a status-line explanation.
+- Process name receives remaining width.
+- PID and memory values are right-aligned.
+- Relative memory bars compare against the largest app in the current list.
+- Highlight only the selected process marker and name; never draw a full-width
+  selection bar.
+- Show Restart, Stop and Details once in an action bar directly below the list.
+- The action bar names the selected process and uses `[R]`, `[S]`, `[D]` shortcuts.
+- Keep the selected name and its actions adjacent; unused terminal width stays
+  after the group instead of separating its two parts.
+- Unavailable restart shows `[R] --`; narrow terminals use compact action labels.
+- Keyboard focus remains visible in both color and no-color modes.
+- Never set foreground or background colors. Keep the terminal's own monochrome
+  palette and use weight, underline, dim text and reverse video for hierarchy.
+- Warnings and force-stop confirmations remain explicit in text and weight.
 - Do not draw a border around every row or action.
 
 ### Focus model
@@ -367,7 +371,8 @@ enum FocusColumn {
 When enabled:
 
 - request Crossterm mouse capture;
-- map the click coordinate to the same row and `FocusColumn` used by keyboard;
+- table clicks select a row; shared action-bar clicks use the selected row and
+  the same `FocusColumn` used by keyboard;
 - left click once selects; clicking an already selected action activates it;
 - wheel scrolls without changing the focused column;
 - `--no-mouse` and config must disable capture entirely;

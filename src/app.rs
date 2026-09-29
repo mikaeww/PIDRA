@@ -1,4 +1,5 @@
 use std::{
+    cell::Cell,
     collections::{HashMap, HashSet, VecDeque},
     time::Instant,
 };
@@ -139,6 +140,8 @@ pub struct App {
     pub view: AppView,
     pub details_root: Option<ProcessIdentity>,
     pub details_selected: usize,
+    pub details_technical: bool,
+    pub info_scroll: Cell<u16>,
     pub expanded_nodes: HashSet<ProcessIdentity>,
     pub confirmation: Option<Confirmation>,
     pub restart_confirmation: Option<RestartConfirmation>,
@@ -171,6 +174,14 @@ impl App {
         self.table_view == AppView::Developer
     }
 
+    pub fn display_name<'a>(&'a self, process: &'a ProcessSnapshot) -> &'a str {
+        self.gui_classifications
+            .get(&process.identity)
+            .and_then(|classification| classification.display_name.as_deref())
+            .filter(|name| !name.trim().is_empty())
+            .unwrap_or(&process.name)
+    }
+
     #[must_use]
     pub fn restart_source_for(&self, identity: ProcessIdentity) -> RestartSource {
         self.process_by_identity(identity).map_or_else(
@@ -200,6 +211,8 @@ impl App {
             view: AppView::Table,
             details_root: None,
             details_selected: 0,
+            details_technical: false,
+            info_scroll: Cell::new(0),
             expanded_nodes: HashSet::new(),
             confirmation: None,
             restart_confirmation: None,
@@ -265,6 +278,8 @@ impl App {
             view: AppView::Table,
             details_root: None,
             details_selected: 0,
+            details_technical: false,
+            info_scroll: Cell::new(0),
             expanded_nodes: HashSet::new(),
             confirmation: None,
             restart_confirmation: None,
@@ -354,6 +369,8 @@ impl App {
         };
         self.details_root = Some(process.identity);
         self.details_selected = 0;
+        self.details_technical = false;
+        self.info_scroll.set(0);
         self.expanded_nodes.clear();
         self.expanded_nodes.insert(process.identity);
         self.view = AppView::Details;
@@ -377,6 +394,7 @@ impl App {
             })
             .filter(|process| {
                 query.is_empty()
+                    || self.display_name(process).to_lowercase().contains(&query)
                     || process.name.to_lowercase().contains(&query)
                     || process.identity.pid.to_string().contains(&query)
             })
@@ -404,7 +422,10 @@ impl App {
             SortMode::Cpu => right_resources
                 .cpu_percent
                 .total_cmp(&left_resources.cpu_percent),
-            SortMode::Name => left.name.to_lowercase().cmp(&right.name.to_lowercase()),
+            SortMode::Name => self
+                .display_name(left)
+                .to_lowercase()
+                .cmp(&self.display_name(right).to_lowercase()),
             SortMode::Pid => left.identity.pid.cmp(&right.identity.pid),
             SortMode::WriteRate => right_resources
                 .write_rate_bytes
@@ -506,6 +527,29 @@ impl App {
             return;
         }
 
+        if matches!(self.view, AppView::Details | AppView::RestartConfirm) {
+            match key.code {
+                KeyCode::PageDown => {
+                    self.info_scroll
+                        .set(self.info_scroll.get().saturating_add(5));
+                    return;
+                }
+                KeyCode::PageUp => {
+                    self.info_scroll
+                        .set(self.info_scroll.get().saturating_sub(5));
+                    return;
+                }
+                KeyCode::Home => {
+                    self.info_scroll.set(0);
+                    return;
+                }
+                KeyCode::End => {
+                    self.info_scroll.set(u16::MAX);
+                    return;
+                }
+                _ => {}
+            }
+        }
         match self.view {
             AppView::Details => {
                 self.handle_details_key(key);
@@ -551,7 +595,16 @@ impl App {
     }
 
     fn handle_details_key(&mut self, key: KeyEvent) {
+        if matches!(
+            key.code,
+            KeyCode::Up | KeyCode::Down | KeyCode::Left | KeyCode::Right | KeyCode::Tab
+        ) {
+            self.info_scroll.set(0);
+        }
         match key.code {
+            KeyCode::Tab => {
+                self.details_technical = !self.details_technical;
+            }
             KeyCode::Esc => {
                 self.view = self.table_view;
                 self.status = if self.table_view == AppView::Developer {
@@ -777,6 +830,8 @@ impl App {
                 self.view = AppView::Details;
                 self.details_root = Some(process.identity);
                 self.details_selected = 0;
+                self.details_technical = false;
+                self.info_scroll.set(0);
                 self.expanded_nodes.clear();
                 self.expanded_nodes.insert(process.identity);
                 self.status = format!("Inspecting {} ({})", process.name, process.identity.pid);
@@ -936,9 +991,10 @@ impl App {
             );
             return;
         }
+        self.info_scroll.set(0);
         self.restart_confirmation = Some(RestartConfirmation {
             identity: process.identity,
-            process_name: process.name.clone(),
+            process_name: self.display_name(process).to_owned(),
             source,
             return_to,
         });
