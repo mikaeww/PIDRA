@@ -396,26 +396,24 @@ pub fn classify_gui_processes(
     });
     for classification in classifications.values_mut() {
         let process = process_by_pid[&classification.identity.pid];
-        if matches!(
-            process.name.as_str(),
-            "kitty" | "foot" | "alacritty" | "wezterm-gui"
-        ) {
-            let mut tools: Vec<_> = tree
-                .descendants(process.identity)
-                .iter()
-                .filter_map(|identity| process_by_pid.get(&identity.pid))
-                .filter_map(|child| match child.name.as_str() {
-                    "claude" => Some("Claude"),
-                    "codex" => Some("Codex"),
-                    _ => None,
-                })
-                .collect();
-            tools.sort_unstable();
-            tools.dedup();
-            if !tools.is_empty() {
-                classification.display_name =
-                    Some(format!("{} - {}", process.name, tools.join(" / ")));
-            }
+        let mut programs: Vec<_> = tree
+            .descendants(process.identity)
+            .iter()
+            .filter_map(|identity| process_by_pid.get(&identity.pid))
+            .filter_map(|shell| {
+                shell
+                    .tty_foreground_pgid
+                    .filter(|pgid| *pgid != shell.identity.pid)
+            })
+            .filter_map(|pgid| process_by_pid.get(&pgid))
+            .map(|program| program_label(program))
+            .filter(|label| !label.is_empty())
+            .collect();
+        programs.sort_unstable();
+        programs.dedup();
+        if !programs.is_empty() {
+            classification.display_name =
+                Some(format!("{} - {}", process.name, programs.join(" / ")));
         }
     }
 
@@ -425,6 +423,45 @@ pub fn classify_gui_processes(
         .collect();
     classifications.sort_by_key(|classification| classification.identity);
     classifications
+}
+
+fn program_label(program: &ProcessSnapshot) -> String {
+    let arguments: Vec<_> = program
+        .command
+        .iter()
+        .map(|argument| argument.to_string_lossy())
+        .collect();
+    // A process that rewrote its argv into one string keeps the program in the first word.
+    let argv0 = arguments
+        .first()
+        .and_then(|argument| argument.split_whitespace().next())
+        .unwrap_or(&program.name);
+    let base = |path: &str| {
+        path.rsplit('/')
+            .next()
+            .unwrap_or(path)
+            .trim_start_matches('-')
+            .to_owned()
+    };
+    let executable = base(argv0);
+    let interpreter = executable
+        .trim_end_matches(|character: char| character.is_ascii_digit() || character == '.');
+    let label = if matches!(
+        interpreter,
+        "node" | "bun" | "deno" | "python" | "ruby" | "perl"
+    ) {
+        arguments
+            .iter()
+            .skip(1)
+            .find(|argument| !argument.starts_with('-'))
+            .map_or(executable, |script| base(script))
+    } else {
+        executable
+    };
+    label
+        .chars()
+        .filter(|character| !character.is_control())
+        .collect()
 }
 
 fn scope_evidence(scope: &str) -> Vec<String> {
@@ -510,10 +547,25 @@ mod tests {
     fn names_apps_and_terminal_tools_without_merging_independent_windows() {
         let scope = "0::/user.slice/app.slice/app-kitty-100.scope";
         let terminal = process("kitty", 100, Some(1), scope);
-        let cli = process("claude", 101, Some(100), scope);
+        let mut shell = process("fish", 103, Some(100), scope);
+        shell.tty_foreground_pgid = Some(101);
+        let cli = process("claude", 101, Some(103), scope);
+        let mut node_shell = process("fish", 104, Some(100), scope);
+        node_shell.tty_foreground_pgid = Some(105);
+        let mut node = process("node-MainThread", 105, Some(104), scope);
+        node.command = vec![
+            "node".into(),
+            "--no-warnings".into(),
+            "/home/u/.local/bin/deepcode".into(),
+        ];
+        let mut idle_shell = process("fish", 106, Some(100), scope);
+        idle_shell.tty_foreground_pgid = Some(106);
         let electron = process("electron", 102, Some(100), scope);
         let mut other_terminal = process("kitty", 200, Some(1), "0::/session.scope");
-        let codex = process("codex", 201, Some(200), "0::/session.scope");
+        let mut other_shell = process("zsh", 202, Some(200), "0::/session.scope");
+        other_shell.tty_foreground_pgid = Some(201);
+        let mut codex = process("codex", 201, Some(202), "0::/session.scope");
+        codex.command = vec!["/opt/codex/bin/codex".into(), "resume".into()];
         let sandbox = process(
             "bwrap",
             300,
@@ -542,9 +594,14 @@ mod tests {
         ];
         let processes = vec![
             terminal,
+            shell,
             cli,
+            node_shell,
+            node,
+            idle_shell,
             electron,
             other_terminal.clone(),
+            other_shell,
             codex,
             sandbox.clone(),
         ];
@@ -556,9 +613,9 @@ mod tests {
         assert_eq!(
             names,
             [
-                (100, "kitty - Claude"),
+                (100, "kitty - claude / deepcode"),
                 (102, "Notes"),
-                (200, "kitty - Codex"),
+                (200, "kitty - codex"),
                 (300, "GNOME Boxes")
             ]
         );

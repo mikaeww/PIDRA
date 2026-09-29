@@ -26,6 +26,7 @@ pub struct ParsedStat {
     pub name: String,
     pub state: ProcessState,
     pub parent_pid: Option<i32>,
+    pub tty_foreground_pgid: Option<i32>,
     pub cpu_time_ticks: u64,
     pub thread_count: u32,
     pub start_time_ticks: u64,
@@ -99,6 +100,7 @@ fn read_process(process_dir: &Path, directory_pid: i32, page_size: u64) -> Optio
             .map_or_else(Vec::new, |bytes| parse_cmdline(&bytes)),
         cwd: fs::read_link(process_dir.join("cwd")).ok(),
         parent_pid: stat.parent_pid,
+        tty_foreground_pgid: stat.tty_foreground_pgid,
         uid,
         state: stat.state,
         rss_bytes,
@@ -180,6 +182,13 @@ pub fn parse_stat(input: &[u8]) -> Result<ParsedStat, &'static str> {
     let parent_pid = i32::try_from(parent_pid_raw)
         .ok()
         .filter(|parent| *parent > 0);
+    let session = parse_i64(fields[3], "invalid session")?;
+    let tty_nr = parse_i64(fields[4], "invalid tty")?;
+    let tpgid = parse_i64(fields[5], "invalid tpgid")?;
+    // Only a session leader on a tty is the shell a terminal window spawned; tpgid then names what runs in its foreground.
+    let tty_foreground_pgid = (tty_nr != 0 && session == i64::from(pid))
+        .then(|| i32::try_from(tpgid).ok().filter(|pgid| *pgid > 0))
+        .flatten();
     let user_ticks = parse_u64(fields[11], "invalid utime")?;
     let system_ticks = parse_u64(fields[12], "invalid stime")?;
 
@@ -188,6 +197,7 @@ pub fn parse_stat(input: &[u8]) -> Result<ParsedStat, &'static str> {
         name,
         state: ProcessState::from_procfs(state_char),
         parent_pid,
+        tty_foreground_pgid,
         cpu_time_ticks: user_ticks.saturating_add(system_ticks),
         thread_count: u32::try_from(parse_u64(fields[17], "invalid threads")?)
             .map_err(|_| "thread count overflow")?,
