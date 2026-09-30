@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/pidra.png" width="96" alt="PIDRA icon"></p>
+
 # PIDRA
 
 PIDRA is a small Linux TUI for answering two questions:
